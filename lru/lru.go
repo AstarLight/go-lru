@@ -18,6 +18,9 @@ type Cache struct {
 
 	NeedLock bool   // 并发安全LRU需要锁
 	lock sync.Mutex
+
+	HitCnt int  // 命中的次数
+	GetCnt int  // 请求读的次数
 }
 
 type Kv struct {
@@ -25,7 +28,7 @@ type Kv struct {
 	v interface{}
 }
 
-func NewLruCache(maxCapacity int, needLock bool) *Cache {
+func NewLruCache(maxCapacity int, needLock bool, fn func(key Key, value interface{})) *Cache {
 	if maxCapacity <= 0 {
 		return nil
 	}
@@ -35,6 +38,7 @@ func NewLruCache(maxCapacity int, needLock bool) *Cache {
 		linklist:list.New(),
 		cache:make(map[interface{}]*list.Element),
 		NeedLock:needLock,
+		Callback:fn,
 	}
 }
 
@@ -62,6 +66,7 @@ func (c *Cache) Get(key Key) (val interface{}, err error) {
 		c.lock.Lock()
 	}
 	defer c.lock.Unlock()
+	c.GetCnt += 1
 	if c.cache == nil {
 		return nil, errors.New("lru cache is not exist")
 	}
@@ -69,6 +74,7 @@ func (c *Cache) Get(key Key) (val interface{}, err error) {
 	if !ok {
 		return nil, errors.New("key not in cache")
 	}
+	c.HitCnt += 1
 	c.linklist.MoveToFront(elem)
 	return elem.Value.(*Kv).v, nil
 }
@@ -90,4 +96,9 @@ func (c *Cache) removeOldest() {
 		return
 	}
 	c.linklist.Remove(oldest)
+	kv := oldest.Value.(*Kv)
+	delete(c.cache, kv.k)
+	if c.Callback != nil {
+		c.Callback(kv.k, kv.v)
+	}
 }
